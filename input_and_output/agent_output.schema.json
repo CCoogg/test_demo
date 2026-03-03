@@ -30,6 +30,12 @@
         "required": ["related_step"],
         "properties": {
           "related_step": {"type": "integer", "minimum": 1},
+          "coord": {
+            "type": ["array", "null"],
+            "items": {"type": "integer"},
+            "minItems": 2,
+            "maxItems": 2
+          },
           "screenshot_path": {"type": ["string", "null"]},
           "element_snapshot": {"type": ["object", "null"]},
           "locator_candidate": {"type": ["object", "null"]}

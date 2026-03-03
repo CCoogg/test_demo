@@ -345,6 +345,22 @@ def _pick_clickable_fallback(
     return elem
 
 
+def _extract_action_coord(action: Dict[str, Any]) -> Optional[List[int]]:
+    # Prefer explicit element, then swipe start/end (best-effort).
+    if not action:
+        return None
+    coord = action.get("element")
+    if isinstance(coord, list) and len(coord) == 2:
+        return coord
+    coord = action.get("start")
+    if isinstance(coord, list) and len(coord) == 2:
+        return coord
+    coord = action.get("end")
+    if isinstance(coord, list) and len(coord) == 2:
+        return coord
+    return None
+
+
 def build_locator_candidate_at(
     device_id: Optional[str], abs_x: int, abs_y: int
 ) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
@@ -510,7 +526,11 @@ def run_substep(
             "action": action.get("action") if action else None,
             "target": None,
             "zone": None,
-            "params": {k: v for k, v in action.items() if k in ("text", "start", "end", "app")},
+            "params": {
+                k: v
+                for k, v in action.items()
+                if k in ("text", "start", "end", "app", "element")
+            },
             "status": "passed" if res.success else "failed",
             "error": res.message if (not res.success and res.message) else None,
         }
@@ -519,8 +539,21 @@ def run_substep(
         # Element snapshot observation (best-effort)
         if device_type == "adb" and action:
             action_name = action.get("action")
-            if action_name in {"Tap", "Double Tap", "Long Press"}:
-                coord = action.get("element")
+            regular_actions = {
+                "Tap",
+                "Double Tap",
+                "Long Press",
+                "Swipe",
+                "Type",
+                "Type_Name",
+                "Scroll",
+                "Drag",
+                "Press",
+                "Back",
+                "Wait",
+            }
+            if action_name in regular_actions:
+                coord = _extract_action_coord(action)
                 if isinstance(coord, list) and len(coord) == 2:
                     try:
                         df = get_device_factory()
@@ -534,6 +567,7 @@ def run_substep(
                                 {
                                     "related_step": step_index,
                                     "screenshot_path": None,
+                                    "coord": coord,
                                     "element_snapshot": snap,
                                     "locator_candidate": candidate,
                                 }
@@ -546,21 +580,25 @@ def run_substep(
             try:
                 df = get_device_factory()
                 shot = df.get_screenshot(agent.agent_config.device_id)
+                fail_coord = _extract_action_coord(action) if action else None
                 observations.append(
                     {
                         "related_step": step_index,
                         "screenshot_base64": shot.base64_data,
                         "screenshot_path": None,
+                        "coord": fail_coord,
                         "element_snapshot": None,
                         "locator_candidate": None,
                     }
                 )
             except Exception as e:
+                fail_coord = _extract_action_coord(action) if action else None
                 observations.append(
                     {
                         "related_step": step_index,
                         "screenshot_base64": None,
                         "screenshot_path": None,
+                        "coord": fail_coord,
                         "element_snapshot": None,
                         "locator_candidate": None,
                         "error": f"screenshot failed: {e}",

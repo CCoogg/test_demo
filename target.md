@@ -23,6 +23,7 @@
 - Action 词表层。建立 DSL Action 词表与映射规则，禁止 driver 级动词与坐标类动作进入 Steps。
 - Assertion 建模层。坚持 suggestion 模型，禁止 final_type，输出 confidence 与参数规范。
 - Observation 证据层。强制 observations 关联 step_index，规范 element_snapshot 字段与截图路径保留策略。
+- Observation 证据层补充。对常规动作输出 locator_candidate，并记录 coord 以便与 steps 回放/复盘关联。
 - Locator 命名层。执行全大写下划线语义命名规范，禁止 UI 属性命名与版本污染。
 - Locator Registry 治理层。引入 candidate 去重与审核流程，禁止无 confidence 的候选。
 - 输入链路层。明确 CSV -> 执行 -> JSON -> Registry -> YAML 的流水线边界与产物定义。

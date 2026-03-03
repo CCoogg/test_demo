@@ -59,8 +59,9 @@
 
 - [x] 仅在失败时采集整屏截图，保存到 `artifacts/<case_id>/subXX_stepYY.png`
 - [x] 在 `observations[]` 写入：`related_step` + `screenshot_path`（仅失败步骤存在）
+- [x] 常规动作可写 `locator_candidate`；同时记录 `coord` 以便与 steps 的坐标回放对应
 - [x] UI 文本采集：Android 通过 `uiautomator dump` 提取 text/content-desc，用于基础断言
-- [ ] UI 树/元素快照：`element_snapshot/locator_candidate` 暂置空
+- [x] UI 树/元素快照：对常规动作 best-effort 生成 `element_snapshot/locator_candidate`
 
 ---
 
@@ -112,6 +113,7 @@
   - 子步骤边界清晰（每条子步骤都有 `finish` 收束痕迹）
   - `steps.step_index` 单调递增且可回放
   - 失败步骤具备截图证据（`observations.screenshot_path`）
+  - 常规动作可回溯定位（`observations.coord`/`locator_candidate`）
 - [x] 失败用例不会阻塞后续用例（除非环境级错误）
 
 ---

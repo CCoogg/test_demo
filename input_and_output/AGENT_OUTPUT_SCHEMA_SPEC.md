@@ -172,6 +172,7 @@ action = DSL 级动作语义（Declarative Test Action）
 ```json
 {
   "related_step": 1,
+  "coord": [400, 154],
   "element_snapshot": {
       "text": "登录",
       "resourceId": "com.xxx:id/login_btn",

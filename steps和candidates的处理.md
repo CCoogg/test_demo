@@ -13,12 +13,20 @@
 - 若需要语义 target，应来自 Registry 或人工审核后的语义 key。
 - steps.params 可以保留动作必要参数（坐标、duration 等）用于回溯与排障。
 
+## 常规步骤定义（需记录 locator_candidate）
+- 目标：有助于下游固定测试代码的可定位动作，都尽量记录 locator_candidate。
+- 常规步骤（目前认定）：Tap / Double Tap / Long Press / Swipe / Type / Type_Name / Scroll / Drag / Press / Back / Wait。
+- 说明：
+  - 若动作本身没有可用坐标（例如 Type/Back/Wait），则 locator_candidate 只能按“best-effort”跳过。
+  - 若动作包含坐标参数（element/start/end），优先使用 element；否则使用 start；仍无则可使用 end。
+
 ## locator_candidate 输出位置
 - 输出在 JSONL 每条用例的 `observations` 数组中。
 - 结构示例：
   ```json
   {
     "related_step": 1,
+    "coord": [400, 154],
     "element_snapshot": {"text":"登录","resourceId":"com.xxx:id/login_btn","class":"android.widget.Button","bounds":"[1,2][3,4]","clickable":"true","contentDesc":null},
     "locator_candidate": {
       "strategies": [
