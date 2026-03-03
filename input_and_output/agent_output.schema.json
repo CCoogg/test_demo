@@ -1,0 +1,42 @@
+﻿{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Agent Output (Minimal)",
+  "type": "object",
+  "required": ["case_meta", "steps", "assertions", "observations"],
+  "properties": {
+    "case_meta": {"type": "object"},
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["step_index", "action", "status"],
+        "properties": {
+          "step_index": {"type": "integer", "minimum": 1},
+          "action": {"type": ["string", "null"]},
+          "target": {"type": ["string", "null"]},
+          "zone": {"type": ["string", "null"]},
+          "params": {"type": ["object", "null"]},
+          "status": {"type": "string"},
+          "error": {"type": ["string", "null"]}
+        },
+        "additionalProperties": true
+      }
+    },
+    "assertions": {"type": "array"},
+    "observations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["related_step"],
+        "properties": {
+          "related_step": {"type": "integer", "minimum": 1},
+          "screenshot_path": {"type": ["string", "null"]},
+          "element_snapshot": {"type": ["object", "null"]},
+          "locator_candidate": {"type": ["object", "null"]}
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}
