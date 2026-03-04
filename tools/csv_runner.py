@@ -246,7 +246,7 @@ def dump_ui_xml_adb(device_id: Optional[str]) -> Optional[ET.Element]:
 
 
 def parse_bounds(bounds: str) -> Optional[Tuple[int, int, int, int]]:
-    m = re.match(r"\\[(\\d+),(\\d+)\\]\\[(\\d+),(\\d+)\\]", bounds or "")
+    m = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds or "")
     if not m:
         return None
     return tuple(int(x) for x in m.groups())
@@ -305,6 +305,36 @@ def _confidence(elem: ET.Element) -> float:
     return min(1.0, score)
 
 
+def _build_xpath(elem: ET.Element, parent_map: Dict[ET.Element, ET.Element | None]) -> str:
+    cls = elem.attrib.get("class")
+    rid = elem.attrib.get("resource-id")
+    text = elem.attrib.get("text")
+    cdesc = elem.attrib.get("content-desc")
+    # Prefer attribute-based XPath (stable across layout changes)
+    tag = cls or "*"
+    if rid:
+        return f"//{tag}[@resource-id='{rid}']"
+    if text:
+        return f"//{tag}[@text='{text}']"
+    if cdesc:
+        return f"//{tag}[@content-desc='{cdesc}']"
+    # Fallback: absolute position-based XPath
+    parts: List[str] = []
+    cur = elem
+    while cur is not None:
+        cur_cls = cur.attrib.get("class")
+        cur_tag = cur_cls if cur_cls else "hierarchy"
+        parent = parent_map.get(cur)
+        if parent is None:
+            parts.append(cur_tag)
+        else:
+            siblings = [c for c in list(parent) if c.attrib.get("class") == cur_cls]
+            idx = (siblings.index(cur) + 1) if cur in siblings else 1
+            parts.append(f"{cur_tag}[{idx}]")
+        cur = parent
+    return "/" + "/".join(reversed(parts))
+
+
 def _strategy_list(elem: ET.Element, parent_map: Dict[ET.Element, ET.Element | None]) -> List[Dict[str, str]]:
     strategies: List[Dict[str, str]] = []
     rid = elem.attrib.get("resource-id")
@@ -316,6 +346,7 @@ def _strategy_list(elem: ET.Element, parent_map: Dict[ET.Element, ET.Element | N
     text = elem.attrib.get("text")
     if text:
         strategies.append({"by": "text", "value": text})
+    strategies.append({"by": "xpath", "value": _build_xpath(elem, parent_map)})
     strategies.append({"by": "class_chain", "value": _class_chain(elem, parent_map)})
     return strategies
 
@@ -361,13 +392,10 @@ def _extract_action_coord(action: Dict[str, Any]) -> Optional[List[int]]:
     return None
 
 
-def build_locator_candidate_at(
-    device_id: Optional[str], abs_x: int, abs_y: int
+def _find_element_in_tree(
+    root: ET.Element, abs_x: int, abs_y: int
 ) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
-    root = dump_ui_xml_adb(device_id)
-    if root is None:
-        return None, None
-
+    """Look up element at (abs_x, abs_y) in a pre-dumped UI tree."""
     parent_map = _build_parent_map(root)
     matches: List[ET.Element] = []
     for elem in root.iter():
@@ -396,13 +424,21 @@ def build_locator_candidate_at(
     matches.sort(key=area)
     primary = _pick_clickable_fallback(matches[0], parent_map)
 
-    # build strategies sorted by priority in spec
     strategies = _strategy_list(primary, parent_map)
     locator_candidate = {
         "strategies": strategies,
         "confidence": _confidence(primary),
     }
     return _snap(primary), locator_candidate
+
+
+def build_locator_candidate_at(
+    device_id: Optional[str], abs_x: int, abs_y: int
+) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    root = dump_ui_xml_adb(device_id)
+    if root is None:
+        return None, None
+    return _find_element_in_tree(root, abs_x, abs_y)
 
 
 def rel_to_abs(
@@ -505,6 +541,37 @@ def run_substep(
     # Strategy A: each substep in a fresh context
     agent.reset()
 
+    # Get screen dimensions once (they don't change during a substep)
+    screen_w: Optional[int] = None
+    screen_h: Optional[int] = None
+    if device_type == "adb":
+        try:
+            df = get_device_factory()
+            shot = df.get_screenshot(agent.agent_config.device_id)
+            screen_w, screen_h = shot.width, shot.height
+        except Exception:
+            pass
+
+    # Pre-dump UI tree BEFORE the first agent.step() so we capture the screen
+    # state that the model will actually see (and act upon).
+    pre_root: Optional[ET.Element] = None
+    if device_type == "adb":
+        pre_root = dump_ui_xml_adb(agent.agent_config.device_id)
+
+    regular_actions = {
+        "Tap",
+        "Double Tap",
+        "Long Press",
+        "Swipe",
+        "Type",
+        "Type_Name",
+        "Scroll",
+        "Drag",
+        "Press",
+        "Back",
+        "Wait",
+    }
+
     while True:
         is_first = step_index == 0
         first_text = (
@@ -536,44 +603,35 @@ def run_substep(
         }
         steps.append(entry)
 
-        # Element snapshot observation (best-effort)
+        # Element snapshot observation using the UI tree captured BEFORE this
+        # action executed, so it reflects the screen the model actually saw.
         if device_type == "adb" and action:
             action_name = action.get("action")
-            regular_actions = {
-                "Tap",
-                "Double Tap",
-                "Long Press",
-                "Swipe",
-                "Type",
-                "Type_Name",
-                "Scroll",
-                "Drag",
-                "Press",
-                "Back",
-                "Wait",
-            }
             if action_name in regular_actions:
                 coord = _extract_action_coord(action)
-                if isinstance(coord, list) and len(coord) == 2:
+                snap = None
+                candidate = None
+                if (
+                    isinstance(coord, list)
+                    and len(coord) == 2
+                    and pre_root is not None
+                    and screen_w
+                    and screen_h
+                ):
                     try:
-                        df = get_device_factory()
-                        shot = df.get_screenshot(agent.agent_config.device_id)
-                        abs_x, abs_y = rel_to_abs(coord, shot.width, shot.height)
-                        snap, candidate = build_locator_candidate_at(
-                            agent.agent_config.device_id, abs_x, abs_y
-                        )
-                        if snap or candidate:
-                            observations.append(
-                                {
-                                    "related_step": step_index,
-                                    "screenshot_path": None,
-                                    "coord": coord,
-                                    "element_snapshot": snap,
-                                    "locator_candidate": candidate,
-                                }
-                            )
+                        abs_x, abs_y = rel_to_abs(coord, screen_w, screen_h)
+                        snap, candidate = _find_element_in_tree(pre_root, abs_x, abs_y)
                     except Exception:
                         pass
+                observations.append(
+                    {
+                        "related_step": step_index,
+                        "screenshot_path": None,
+                        "coord": coord,
+                        "element_snapshot": snap,
+                        "locator_candidate": candidate,
+                    }
+                )
 
         # Failure-only observation
         if not res.success:
@@ -607,6 +665,14 @@ def run_substep(
 
         if res.finished or step_index >= agent.agent_config.max_steps:
             break
+
+        # Dump UI for the NEXT step now, while the screen has settled after the
+        # current action. This will be used as pre_root in the next iteration.
+        if device_type == "adb":
+            try:
+                pre_root = dump_ui_xml_adb(agent.agent_config.device_id)
+            except Exception:
+                pre_root = None
 
     return steps, observations, raw_actions
 
@@ -839,6 +905,9 @@ def main() -> None:
                     base = len(case_steps)
                     for s in steps:
                         s["step_index"] = base + s["step_index"]
+                    for o in observations:
+                        if o.get("related_step") is not None:
+                            o["related_step"] = base + o["related_step"]
                     case_steps.extend(steps)
                     case_observations.extend(observations)
 
